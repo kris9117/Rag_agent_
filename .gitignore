@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables
+.env
+
+# IDE
+.vscode/
+.idea/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Generated data
+data/index/
+data/generated/
+
+# Logs
+*.log
+logs/
+
+# Evaluation outputs
+evaluation/results/*.json
+evaluation/results/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
