@@ -1,0 +1,76 @@
+sequenceDiagram
+    autonumber
+    actor Employee as Employee / Client
+    participant API as FastAPI Gateway (/api/v1/support)
+    participant Auth as Auth & Identity Service
+    participant Graph as LangGraph Orchestrator
+    participant Intent as Intent Classifier (OpenAI)
+    participant Router as Deterministic Router
+    participant RAG as Hybrid RAG (FAISS + BM25 + RRF + Cross-Encoder)
+    participant Tool as Tool / Action Executor
+    participant DB as SQLite Demo DB (enterprise.db)
+    participant Observability as Observability & Prometheus
+
+    Employee->>API: POST /api/v1/support (Query + API Key)
+    activate API
+    API->>Auth: Validate Credentials & Header
+    activate Auth
+    Note over Auth: Verify demo key & bind effective user_id<br/>Block cross-user impersonation (403)
+    Auth-->>API: AuthenticatedUser (user_id, role)
+    deactivate Auth
+
+    API->>Observability: start_request_metrics(request_id)
+    API->>Graph: invoke(initial_state)
+    activate Graph
+
+    Graph->>Intent: understand_request(query)
+    activate Intent
+    Intent-->>Graph: RequestUnderstanding (intent, entities, confidence)
+    deactivate Intent
+
+    Graph->>Router: route_request(intent, entities)
+    activate Router
+    Router-->>Graph: route (KNOWLEDGE | TOOL | ACTION | ESCALATION | CLARIFICATION)
+    deactivate Router
+
+    alt Route: KNOWLEDGE (Informational / RAG)
+        Graph->>RAG: retrieve_and_rerank(query, top_k=5)
+        activate RAG
+        Note over RAG: 1. FAISS Dense Retrieval (IndexFlatL2)<br/>2. BM25Okapi Lexical Retrieval<br/>3. Reciprocal Rank Fusion (RRF)<br/>4. Cross-Encoder Reranker (ms-marco)
+        RAG-->>Graph: Top ranked context chunks + metadata
+        deactivate RAG
+        Graph->>Intent: generate_rag_response(query, context)
+        activate Intent
+        Intent-->>Graph: Grounded response with markdown source citations
+        deactivate Intent
+
+    else Route: TOOL (Read-only status lookup)
+        Graph->>Tool: execute_tool(tool_name, arguments)
+        activate Tool
+        Tool->>DB: Check entity ownership & query status
+        DB-->>Tool: Row record (Account / Device / Ticket)
+        Tool-->>Graph: Structured tool result (success/failure)
+        deactivate Tool
+
+    else Route: ACTION (Ticket Creation)
+        Graph->>Tool: create_ticket(user_id, category, priority, description)
+        activate Tool
+        Tool->>DB: INSERT into tickets table (auto INC ID)
+        DB-->>Tool: Created ticket record (INC000XXX)
+        Tool-->>Graph: Action completion result
+        deactivate Tool
+
+    else Route: ESCALATION (Tier 2 / Security)
+        Note over Graph: Trigger escalation logic<br/>Log security / repeated failure event
+        Graph-->>Graph: Formulate human handover guidance
+
+    else Route: CLARIFICATION (Ambiguous query)
+        Note over Graph: Formulate clarification prompt for missing parameters
+    end
+
+    Graph-->>API: Final AgentState (response, status, tool_results, context)
+    deactivate Graph
+
+    API->>Observability: record_request_metrics(duration, tokens, cost)
+    API-->>Employee: HTTP 200 SupportResponse (JSON with request_id, intent, status, response, sources)
+    deactivate API
